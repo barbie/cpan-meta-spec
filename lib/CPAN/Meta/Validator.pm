@@ -3,26 +3,11 @@ use strict;
 use warnings;
 use autodie;
 package CPAN::Meta::Validator;
+BEGIN {
+  $CPAN::Meta::Validator::VERSION = '2.101091';
+}
 # ABSTRACT: validate CPAN distribution metadata structures
 
-=head1 SYNOPSIS
-
-  my $struct = decode_json_file('META.json');
-
-  my $cmv = CPAN::Meta::Validator->new( $struct );
-
-  unless ( $cmv->is_valid ) {
-    my $msg = "Invalid META structure.  Errors found:\n";
-    $msg .= join( "\n", $cmv->errors );
-    die $msg;
-  }
-
-=head1 DESCRIPTION
-
-This module validates a CPAN Meta structure against the version of the
-the specification claimed in the C<meta-spec> field of the structure.
-
-=cut
 
 use Carp qw(confess);
 
@@ -71,15 +56,17 @@ my $no_index_1_1 = {
 };
 
 my $prereq_map = {
-  ':key' => {
-    name => \&phase,
-    'map' => {
-      ':key'  => {
-        name => \&relation,
-        'map' => $module_map1,
-      },
-    },
-  },
+  'map' => {
+    ':key' => {
+      name => \&phase,
+      'map' => {
+        ':key'  => {
+          name => \&relation,
+          'map' => { ':key' => { name => \&module, value => \&exversion } },
+        }
+      }
+    }
+  }
 };
 
 my %definitions = (
@@ -367,13 +354,6 @@ my %definitions = (
 # Code
 #--------------------------------------------------------------------------#
 
-=method new
-
-  my $cmv = CPAN::Meta::Validator->new( $struct )
-
-The constructor must be passed a metadata structure.
-
-=cut
 
 sub new {
   my ($class,$data) = @_;
@@ -389,16 +369,6 @@ sub new {
   return bless $self, $class;
 }
 
-=method is_valid
-
-  if ( $cmv->is_valid ) {
-    ...
-  }
-
-Returns a boolean value indicating whether the metadata provided
-is valid.
-
-=cut
 
 sub is_valid {
     my $self = shift;
@@ -408,13 +378,6 @@ sub is_valid {
     return ! $self->errors;
 }
 
-=method errors
-
-  warn( join "\n", $cmv->errors );
-
-Returns a list of errors seen during validation.
-
-=cut
 
 sub errors {
     my $self = shift;
@@ -422,29 +385,6 @@ sub errors {
     return @{$self->{errors}};
 }
 
-=begin internals
-
-=head2 Check Methods
-
-=over
-
-=item * check_map($spec,$data)
-
-Checks whether a map (or hash) part of the data structure conforms to the
-appropriate specification definition.
-
-=item * check_list($spec,$data)
-
-Checks whether a list (or array) part of the data structure conforms to
-the appropriate specification definition.
-
-=item * check_lazylist($spec,$data)
-
-Checks whether a list conforms, but converts strings to a single-element list
-
-=back
-
-=cut
 
 sub check_map {
     my ($self,$spec,$data) = @_;
@@ -478,6 +418,8 @@ sub check_map {
                 $self->check_list($spec->{$key}{'list'},$data->{$key});
             } elsif($spec->{$key}{'lazylist'}) {
                 $self->check_lazylist($spec->{$key}{'lazylist'},$data->{$key});
+            } else {
+                $self->_error( "Missing validation action in specification. Must be one of 'map', 'list', 'lazylist', or 'value' for '$key'." );
             }
 
         } elsif ($spec->{':key'}) {
@@ -490,8 +432,9 @@ sub check_map {
                 $self->check_list($spec->{':key'}{'list'},$data->{$key});
             } elsif($spec->{':key'}{'lazylist'}) {
                 $self->check_lazylist($spec->{':key'}{'lazylist'},$data->{$key});
+            } elsif(!$spec->{':key'}{name}) {
+                $self->_error( "Missing validation action in specification. Must be one of 'map', 'list', 'lazylist', 'name' or 'value' for ':key'." );
             }
-
 
         } else {
             $self->_error( "Unknown key, '$key', found in map structure" );
@@ -538,91 +481,12 @@ sub check_list {
         } elsif ($spec->{':key'}) {
             $self->check_map($spec,$value);
         } else {
-            $self->_error( "Unknown value type, '$value', found in list structure" );
+            $self->_error( "Missing validation action in specification. Must be one of 'map', 'list', 'lazylist', 'value' or ':key' in the 'list' or 'lazylist' associated with '$self->{stack}[-2]'." );
         }
         pop @{$self->{stack}};
     }
 }
 
-=head2 Validator Methods
-
-=over
-
-=item * header($self,$key,$value)
-
-Validates that the header is valid.
-
-Note: No longer used as we now read the data structure, not the file.
-
-=item * url($self,$key,$value)
-
-Validates that a given value is in an acceptable URL format
-
-=item * urlspec($self,$key,$value)
-
-Validates that the URL to a META specification is a known one.
-
-=item * string_or_undef($self,$key,$value)
-
-Validates that the value is either a string or an undef value. Bit of a
-catchall function for parts of the data structure that are completely user
-defined.
-
-=item * string($self,$key,$value)
-
-Validates that a string exists for the given key.
-
-=item * file($self,$key,$value)
-
-Validate that a file is passed for the given key. This may be made more
-thorough in the future. For now it acts like \&string.
-
-=item * exversion($self,$key,$value)
-
-Validates a list of versions, e.g. '<= 5, >=2, ==3, !=4, >1, <6, 0'.
-
-=item * version($self,$key,$value)
-
-Validates a single version string. Versions of the type '5.8.8' and '0.00_00'
-are both valid. A leading 'v' like 'v1.2.3' is also valid.
-
-=item * boolean($self,$key,$value)
-
-Validates for a boolean value. Currently these values are '1', '0', 'true',
-'false', however the latter 2 may be removed.
-
-=item * license($self,$key,$value)
-
-Validates that a value is given for the license. Returns 1 if an known license
-type, or 2 if a value is given but the license type is not a recommended one.
-
-=item * custom_1($self,$key,$value)
-
-Validates that the given key is in CamelCase, to indicate a user defined
-keyword and only has characters in the class [-_a-zA-Z].  In version 1.X
-of the spec, this was only explicitly stated for 'resources'.
-
-=item * custom_2($self,$key,$value)
-
-Validates that the given key begins with 'x_' or 'X_', to indicate a user
-defined keyword and only has characters in the class [-_a-zA-Z]
-
-=item * identifier($self,$key,$value)
-
-Validates that key is in an acceptable format for the META specification,
-for an identifier, i.e. any that matches the regular expression
-qr/[a-z][a-z_]/i.
-
-=item * module($self,$key,$value)
-
-Validates that a given key is in an acceptable module name format, e.g.
-'Test::CPAN::Meta::Version'.
-
-=back
-
-=end internals
-
-=cut
 
 sub header {
     my ($self,$key,$value) = @_;
@@ -901,7 +765,139 @@ sub _error {
 
 1;
 
-__END__
+
+
+=pod
+
+=head1 NAME
+
+CPAN::Meta::Validator - validate CPAN distribution metadata structures
+
+=head1 VERSION
+
+version 2.101091
+
+=head1 SYNOPSIS
+
+  my $struct = decode_json_file('META.json');
+
+  my $cmv = CPAN::Meta::Validator->new( $struct );
+
+  unless ( $cmv->is_valid ) {
+    my $msg = "Invalid META structure.  Errors found:\n";
+    $msg .= join( "\n", $cmv->errors );
+    die $msg;
+  }
+
+=head1 DESCRIPTION
+
+This module validates a CPAN Meta structure against the version of the
+the specification claimed in the C<meta-spec> field of the structure.
+
+=head1 METHODS
+
+=head2 new
+
+  my $cmv = CPAN::Meta::Validator->new( $struct )
+
+The constructor must be passed a metadata structure.
+
+=head2 is_valid
+
+  if ( $cmv->is_valid ) {
+    ...
+  }
+
+Returns a boolean value indicating whether the metadata provided
+is valid.
+
+=head2 errors
+
+  warn( join "\n", $cmv->errors );
+
+Returns a list of errors seen during validation.
+
+=begin internals
+
+=head2 Check Methods
+
+=over
+
+=item * check_map($spec,$data)
+
+Checks whether a map (or hash) part of the data structure conforms to the
+appropriate specification definition.
+=item * check_list($spec,$data)
+
+Checks whether a list (or array) part of the data structure conforms to
+the appropriate specification definition.
+=item * check_lazylist($spec,$data)
+
+Checks whether a list conforms, but converts strings to a single-element list
+=back
+
+=head2 Validator Methods
+
+=over
+
+=item * header($self,$key,$value)
+
+Validates that the header is valid.
+
+Note: No longer used as we now read the data structure, not the file.=item * url($self,$key,$value)
+
+Validates that a given value is in an acceptable URL format
+=item * urlspec($self,$key,$value)
+
+Validates that the URL to a META specification is a known one.
+=item * string_or_undef($self,$key,$value)
+
+Validates that the value is either a string or an undef value. Bit of a
+catchall function for parts of the data structure that are completely user
+defined.
+=item * string($self,$key,$value)
+
+Validates that a string exists for the given key.
+=item * file($self,$key,$value)
+
+Validate that a file is passed for the given key. This may be made more
+thorough in the future. For now it acts like \&string.
+=item * exversion($self,$key,$value)
+
+Validates a list of versions, e.g. '<= 5, >=2, ==3, !=4, >1, <6, 0'.
+=item * version($self,$key,$value)
+
+Validates a single version string. Versions of the type '5.8.8' and '0.00_00'
+are both valid. A leading 'v' like 'v1.2.3' is also valid.
+=item * boolean($self,$key,$value)
+
+Validates for a boolean value. Currently these values are '1', '0', 'true',
+'false', however the latter 2 may be removed.
+=item * license($self,$key,$value)
+
+Validates that a value is given for the license. Returns 1 if an known license
+type, or 2 if a value is given but the license type is not a recommended one.
+=item * custom_1($self,$key,$value)
+
+Validates that the given key is in CamelCase, to indicate a user defined
+keyword and only has characters in the class [-_a-zA-Z].  In version 1.X
+of the spec, this was only explicitly stated for 'resources'.
+=item * custom_2($self,$key,$value)
+
+Validates that the given key begins with 'x_' or 'X_', to indicate a user
+defined keyword and only has characters in the class [-_a-zA-Z]
+=item * identifier($self,$key,$value)
+
+Validates that key is in an acceptable format for the META specification,
+for an identifier, i.e. any that matches the regular expression
+qr/[a-z][a-z_]/i.
+=item * module($self,$key,$value)
+
+Validates that a given key is in an acceptable module name format, e.g.
+'Test::CPAN::Meta::Version'.
+=back
+
+=end internals
 
 =head1 BUGS
 
@@ -912,6 +908,22 @@ L<http://rt.cpan.org/Dist/Display.html?Queue=CPAN-Meta>
 When submitting a bug or request, please include a test-file or a patch to an
 existing test-file that illustrates the bug or desired feature.
 
+=head1 AUTHORS
+
+  David Golden <dagolden@cpan.org>
+  Ricardo Signes <rjbs@cpan.org>
+
+=head1 COPYRIGHT AND LICENSE
+
+This software is copyright (c) 2010 by David Golden and Ricardo Signes.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
+
 =cut
+
+
+__END__
+
 
 
