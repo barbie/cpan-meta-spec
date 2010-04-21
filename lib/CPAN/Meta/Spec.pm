@@ -13,7 +13,7 @@ package CPAN::Meta::Spec;
     name => 'Module-Build',
     abstract => 'Build and install Perl modules',
     description =>  "Module::Build is a system for "
-      . "building, testing, and installing Perl modules. "  
+      . "building, testing, and installing Perl modules. "
       . "It is meant to ... blah blah blah ...",
     version  => '0.36',
     author   => [
@@ -67,6 +67,11 @@ package CPAN::Meta::Spec;
 
 This document describes version 2 of the CPAN distribution metadata
 specification, also known as the "CPAN Meta Spec".
+
+Revisions of this specification for typo corrections and prose
+clarifications may be issued as CPAN::Meta::Spec 2.I<x>.  These
+revisions will never change semantics or add or remove specified
+behavior.
 
 Distribution metadata describe important properties of Perl
 distributions. Distribution building tools like Module::Build,
@@ -357,8 +362,8 @@ The following keys are valid, but only C<version> is required.
 
 =item version
 
-This subkey gives the I<Version> of the CPAN Meta Spec against which the
-document was generated.
+This subkey gives the integer I<Version> of the CPAN Meta Spec against
+which the document was generated.
 
 =item url
 
@@ -442,7 +447,7 @@ structure refers.
 Example:
 
     description =>  "Module::Build is a system for "
-      . "building, testing, and installing Perl modules. "  
+      . "building, testing, and installing Perl modules. "
       . "It is meant to ... blah blah blah ...",
 
 (Spec 2) [optional] {String}
@@ -803,8 +808,9 @@ positive integers separated by full stop characters (i.e. "dots",
 "periods" or "decimal points").  This are equivalent in format to Perl
 "v-strings", with some additional restrictions on form.  They must be
 given in "normal" form, which has a leading "v" character and at least
-three integer components.  All components after the first are restricted
-to the range 0 to 999.  The final component B<may> be separated by an
+three integer components.  To retain a one-to-one mapping with decimal
+versions, all components after the first B<should> be restricted to the
+range 0 to 999.  The final component B<may> be separated by an
 underscore character instead of a period.
 
    version => 'v1.2.3'      # OK
@@ -816,7 +822,7 @@ underscore character instead of a period.
    version => 'v1.2'          # Illegal
    version => '1.2.3'         # Illegal
    version => 'v1.2_3_4'      # Illegal
-   version => 'v1.2009.10.31' # Illegal
+   version => 'v1.2009.10.31' # Not recommended
 
 =back
 
